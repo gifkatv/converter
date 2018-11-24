@@ -1,12 +1,13 @@
 package main
 
 import (
+	"os"
 	"log"
 	"net/http"
 
+	"github.com/joho/godotenv"
 	"github.com/ant0ine/go-json-rest/rest"
 	"github.com/coreos/go-semver/semver"
-	// "github.com/jinzhu/gorm"
 )
 
 type SemVerMiddleware struct {
@@ -15,7 +16,6 @@ type SemVerMiddleware struct {
 }
 
 func (mw *SemVerMiddleware) MiddlewareFunc(handler rest.HandlerFunc) rest.HandlerFunc {
-
 	minVersion, err := semver.NewVersion(mw.MinVersion)
 	if err != nil {
 		panic(err)
@@ -27,7 +27,6 @@ func (mw *SemVerMiddleware) MiddlewareFunc(handler rest.HandlerFunc) rest.Handle
 	}
 
 	return func(writer rest.ResponseWriter, request *rest.Request) {
-
 		version, err := semver.NewVersion(request.PathParam("version"))
 		if err != nil {
 			rest.Error(
@@ -61,27 +60,49 @@ func (mw *SemVerMiddleware) MiddlewareFunc(handler rest.HandlerFunc) rest.Handle
 	}
 }
 
-func main() {
-	svmw := SemVerMiddleware{
-		MinVersion: "1.0.0",
-		MaxVersion: "3.0.0",
+func loadEnvironment() map[string]string {
+	env := os.Getenv("GIFKA_ENV")
+	if "" == env {
+		env = "development"
 	}
+
+	var environment map[string]string
+	environment, err := godotenv.Read(".env." + env)
+
+	if (err != nil) {
+		panic(err)
+	}
+
+	return environment
+}
+
+func main() {
+	env := loadEnvironment()
+
+	// svmw := SemVerMiddleware{
+	// 	MinVersion: "1.0.0",
+	// 	MaxVersion: "1.0.0",
+	// }
+
+	statusMiddleware := &rest.StatusMiddleware{}
 	api := rest.NewApi()
+	api.Use(statusMiddleware)
 	api.Use(rest.DefaultDevStack...)
+
+	auth := &rest.AuthBasicMiddleware{
+		Realm: "Converter API",
+		Authenticator: func(username string, password string) bool {
+			if username == env["GIFKA_API_STATUS_USERNAME"] && password == env["GIFKA_API_STATUS_PASSWORD"] {
+				return true
+			}
+			return false
+		},
+	}
+
 	router, err := rest.MakeRouter(
-		rest.Get("/#version/message", svmw.MiddlewareFunc(
-			func(w rest.ResponseWriter, req *rest.Request) {
-				version := req.Env["VERSION"].(*semver.Version)
-				if version.Major == 2 {
-					// https://en.wikipedia.org/wiki/Second-system_effect
-					w.WriteJson(map[string]string{
-						"Body": "Hello broken World!",
-					})
-				} else {
-					w.WriteJson(map[string]string{
-						"Body": "Hello World!",
-					})
-				}
+		rest.Get("/.status", auth.MiddlewareFunc(
+			func(writer rest.ResponseWriter, _req *rest.Request) {
+				writer.WriteJson(statusMiddleware.GetStatus())
 			},
 		)),
 	)
@@ -92,5 +113,5 @@ func main() {
 
 	api.SetApp(router)
 	http.Handle("/api/", http.StripPrefix("/api", api.MakeHandler()))
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":" + env["GIFKA_PORT"], nil))
 }
