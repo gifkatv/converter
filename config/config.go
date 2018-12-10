@@ -3,22 +3,22 @@ package config
 import (
 	"os"
 
-  // process .env
-  "github.com/joho/godotenv"
+	// process .env
+	"github.com/joho/godotenv"
 )
 
 func Load() map[string]string {
-  env := os.Getenv("GIFKA_ENV")
-  if env == "" {
-    env = "development"
-  }
+	env := os.Getenv("GIFKA_ENV")
+	if env == "" {
+		env = "development"
+	}
 
-  var environment map[string]string
-  environment, err := godotenv.Read("config/.env." + env)
+	var environment map[string]string
+	environment, err := godotenv.Read("config/.env." + env)
 
-  if (err != nil) {
-    panic(err)
-  }
+	if (err != nil) {
+		panic(err)
+	}
 
-  return environment
+	return environment
 }
