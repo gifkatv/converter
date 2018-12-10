@@ -39,7 +39,8 @@ func New(cfg map[string]string) *rest.Api {
 	statusMiddleware := &rest.StatusMiddleware{}
 	api := rest.NewApi()
 	api.Use(statusMiddleware)
-	api.Use(rest.DefaultDevStack...)
+	// api.Use(rest.DefaultDevStack...)
+	api.Use(rest.DefaultCommonStack...)
 
 	api.SetApp(router.NewRouter(cfg, statusMiddleware))
 

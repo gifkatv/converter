@@ -2,8 +2,10 @@ package uploader
 
 import (
 	"context"
+	"net/http"
 	"io"
 	"os"
+	"strconv"
 
 	// API framework
 	"github.com/ant0ine/go-json-rest/rest"
@@ -16,44 +18,44 @@ import (
 )
 
 func NewUploader(cfg map[string]string) Uploader {
+	fsize, err := strconv.ParseInt(cfg["GIFKA_UPLOADER_MAX_FILE_SIZE"], 10, 64)
+	if err != nil {
+		panic(err)
+	}
+
 	return Uploader{
-		bucket: cfg['GIFKA_UPLOADER_GC_BUCKET'],
-		maxFileSize: cfg['GIFKA_UPLOADER_MAX_FILE_SIZE']
+		bucket: cfg["GIFKA_UPLOADER_GC_BUCKET"],
+		maxFileSize: fsize,
 	}
 }
 
-const supportedTypes := []string{
-	'image/gif',
-	'video/mp4',
-	'video/webm',
-	'video/x-msvideo'
-}
+var supportedTypes = []string{"image/gif", "video/mp4", "video/webm", "video/x-msvideo"}
 
 type Uploader struct {
 	bucket string
-	maxFileSize int
+	maxFileSize int64
 }
 
 func (u *Uploader) Upload(writer rest.ResponseWriter, request *rest.Request) {
 	request.ParseMultipartForm(u.maxFileSize << 20)
-	formFile, handler, err := request.FormFile("file")
+	formFile, fheader, err := request.FormFile("file")
 	if err != nil {
 		rest.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
 	defer formFile.Close()
 
-	fh, err := os.OpenFile("/tmp/" + handler.Filename, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		rest.Error(writer, err.Error(), http.StatusInternalServerError)
+	// We only have to pass the file header = first 261 bytes
+	head := make([]byte, 261)
+	formFile.Read(head)
+	if !isValid(head) {
+		rest.Error(writer, "Supported file types: mp4, gif, webm and avi", http.StatusBadRequest)
 		return
 	}
 
-	// We only have to pass the file header = first 261 bytes
-	head := make([]byte, 261)
-	fh.Read(head)
-	if !isValid(head) {
-		rest.Error(writer, "Supported file types: mp4, gif, webm and avi", http.StatusBadRequest)
+	fh, err := os.OpenFile("/tmp/" + fheader.Filename, os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		rest.Error(writer, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer fh.Close()
@@ -63,7 +65,7 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, request *rest.Request) {
 		return
 	}
 
-	objAttrs, err := uploadToGoogleStorage(fh, u.bucket, handler.Filename)
+	objAttrs, err := uploadToGoogleStorage(fh, u.bucket, fheader.Filename)
 	if err != nil {
 		switch err {
 		case storage.ErrBucketNotExist:
@@ -73,15 +75,15 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, request *rest.Request) {
 		}
 	}
 
-	writer.WriteJson(map[string]string{"Body": "Uploaded!"})
+	writer.WriteJson(map[string]string{"Body": objAttrs.Name})
 
-		// _, err := enqueuer.Enqueue("send_email", work.Q{"address": "test@example.com", "subject": "hello world", "customer_id": 4})
-		// if err != nil {
-		//  log.Fatal(err)
-		// }
-		// Process an uploaded file in a background
+	// 	_, err := enqueuer.Enqueue("send_email", work.Q{"address": "test@example.com", "subject": "hello world", "customer_id": 4})
+	// 	if err != nil {
+	// 	 log.Fatal(err)
+	// 	}
+	// 	Process an uploaded file in a background
 	// },
-	}
+	// }
 }
 
 func uploadToGoogleStorage(r io.Reader, bucketName, name string) (*storage.ObjectAttrs, error) {

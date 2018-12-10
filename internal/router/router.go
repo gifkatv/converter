@@ -1,10 +1,7 @@
 package router
 
 import (
-	"io"
 	"log"
-	"net/http"
-	"os"
 
 	// API framework
 	"github.com/ant0ine/go-json-rest/rest"
