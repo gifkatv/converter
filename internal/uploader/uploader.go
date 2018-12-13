@@ -2,10 +2,12 @@ package uploader
 
 import (
 	"context"
-	"net/http"
+	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	// API framework
 	"github.com/ant0ine/go-json-rest/rest"
@@ -30,42 +32,29 @@ func NewUploader(cfg map[string]string) Uploader {
 }
 
 var supportedTypes = []string{"image/gif", "video/mp4", "video/webm", "video/x-msvideo"}
+var tmpPath = "/tmp/"
+
+type UploadError struct {
+	code int
+	message string
+}
 
 type Uploader struct {
 	bucket string
 	maxFileSize int64
 }
 
-func (u *Uploader) Upload(writer rest.ResponseWriter, request *rest.Request) {
-	request.ParseMultipartForm(u.maxFileSize << 20)
-	formFile, fheader, err := request.FormFile("file")
-	if err != nil {
-		rest.Error(writer, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer formFile.Close()
-
-	// We only have to pass the file header = first 261 bytes
-	head := make([]byte, 261)
-	formFile.Read(head)
-	if !isValid(head) {
-		rest.Error(writer, "Supported file types: mp4, gif, webm and avi", http.StatusBadRequest)
+func (u *Uploader) Upload(writer rest.ResponseWriter, req *rest.Request) {
+	// Upload a file to the local disk
+	req.ParseMultipartForm(u.maxFileSize << 20)
+	fname, e := uploadToDisk(req)
+	if e != nil {
+		rest.Error(writer, e.message, e.code)
 		return
 	}
 
-	fh, err := os.OpenFile("/tmp/" + fheader.Filename, os.O_WRONLY|os.O_CREATE, 0666)
-	if err != nil {
-		rest.Error(writer, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer fh.Close()
-
-	if _, err := io.Copy(fh, formFile); err != nil {
-		rest.Error(writer, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	objAttrs, err := uploadToGoogleStorage(fh, u.bucket, fheader.Filename)
+	// Upload a file to GCS
+	objAttrs, err := uploadToGCS(fname, u.bucket)
 	if err != nil {
 		switch err {
 		case storage.ErrBucketNotExist:
@@ -75,7 +64,13 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, request *rest.Request) {
 		}
 	}
 
-	writer.WriteJson(map[string]string{"Body": objAttrs.Name})
+	// Remove uploaded a file from the local disk
+	err = os.Remove(tmpPath + fname)
+	if err != nil {
+		rest.Error(writer, err.Error(), http.StatusInternalServerError)
+	}
+
+	writer.WriteJson(map[string]string{"Body": objAttrs.Name}) // map[string]string{"Body": objAttrs.Name})
 
 	// 	_, err := enqueuer.Enqueue("send_email", work.Q{"address": "test@example.com", "subject": "hello world", "customer_id": 4})
 	// 	if err != nil {
@@ -86,7 +81,40 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, request *rest.Request) {
 	// }
 }
 
-func uploadToGoogleStorage(r io.Reader, bucketName, name string) (*storage.ObjectAttrs, error) {
+func uploadToDisk(req *rest.Request) (string, *UploadError) {
+	srcFile, srcAttrs, err := req.FormFile("file")
+	if err != nil {
+		return srcAttrs.Filename, &UploadError{http.StatusBadRequest, err.Error()}
+	}
+	defer srcFile.Close()
+
+	// We only have to pass the file header = first 261 bytes
+	head := make([]byte, 261)
+	srcFile.Read(head)
+	if !isValid(head) {
+		return srcAttrs.Filename, &UploadError{http.StatusBadRequest, "Supported file types: mp4, gif, webm and avi"}
+	}
+
+	dstFile, err := os.OpenFile(tmpPath + srcAttrs.Filename, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return srcAttrs.Filename, &UploadError{http.StatusInternalServerError, err.Error()}
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return srcAttrs.Filename, &UploadError{http.StatusInternalServerError, err.Error()}
+	}
+
+	return srcAttrs.Filename, nil
+}
+
+func uploadToGCS(name, bucketName string) (*storage.ObjectAttrs, error) {
+	f, err := os.Open(tmpPath + name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
 	ctx := context.Background()
 	client, err := storage.NewClient(ctx)
 	if err != nil {
@@ -99,9 +127,10 @@ func uploadToGoogleStorage(r io.Reader, bucketName, name string) (*storage.Objec
 		return nil, err
 	}
 
-	obj := bh.Object(name)
+	path := getBucketPath()
+	obj := bh.Object(path + name)
 	w := obj.NewWriter(ctx)
-	if _, err := io.Copy(w, r); err != nil {
+	if _, err := io.Copy(w, f); err != nil {
 		return nil, err
 	}
 	if err := w.Close(); err != nil {
@@ -110,6 +139,11 @@ func uploadToGoogleStorage(r io.Reader, bucketName, name string) (*storage.Objec
 
 	attrs, err := obj.Attrs(ctx)
 	return attrs, err
+}
+
+func getBucketPath() string {
+	t := time.Now()
+	return fmt.Sprintf("media/%v/", t.Format("2006/01/02"))
 }
 
 func isValid(buf []byte) bool {
