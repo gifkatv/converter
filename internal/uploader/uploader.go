@@ -6,17 +6,25 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	// API framework
 	"github.com/ant0ine/go-json-rest/rest"
-
 	// Validate input filetype
 	"github.com/h2non/filetype"
-
 	// Google Cloud client
 	"cloud.google.com/go/storage"
+)
+
+var (
+	supportedTypes = []string{"image/gif", "video/mp4", "video/webm", "video/x-msvideo"}
+)
+
+const (
+	tmpPath = "/tmp/"
+	fileNameSize = 16
 )
 
 func NewUploader(cfg map[string]string) Uploader {
@@ -30,9 +38,6 @@ func NewUploader(cfg map[string]string) Uploader {
 		maxFileSize: fsize,
 	}
 }
-
-var supportedTypes = []string{"image/gif", "video/mp4", "video/webm", "video/x-msvideo"}
-var tmpPath = "/tmp/"
 
 type UploadError struct {
 	code int
@@ -70,15 +75,7 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, req *rest.Request) {
 		rest.Error(writer, err.Error(), http.StatusInternalServerError)
 	}
 
-	writer.WriteJson(map[string]string{"Body": objAttrs.Name}) // map[string]string{"Body": objAttrs.Name})
-
-	// 	_, err := enqueuer.Enqueue("send_email", work.Q{"address": "test@example.com", "subject": "hello world", "customer_id": 4})
-	// 	if err != nil {
-	// 	 log.Fatal(err)
-	// 	}
-	// 	Process an uploaded file in a background
-	// },
-	// }
+	writer.WriteJson(map[string]string{"Body": objAttrs.Name})
 }
 
 func uploadToDisk(req *rest.Request) (string, *UploadError) {
@@ -128,7 +125,12 @@ func uploadToGCS(name, bucketName string) (*storage.ObjectAttrs, error) {
 	}
 
 	path := getBucketPath()
-	obj := bh.Object(path + name)
+	genFileName, err := generateRandomString(fileNameSize)
+	if err != nil {
+		return nil, err
+	}
+
+	obj := bh.Object(path + genFileName + filepath.Ext(name))
 	w := obj.NewWriter(ctx)
 	if _, err := io.Copy(w, f); err != nil {
 		return nil, err
