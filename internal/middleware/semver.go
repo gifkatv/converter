@@ -12,8 +12,8 @@ import (
 
 func NewSemVerMiddleware() SemVerMiddleware {
 	return SemVerMiddleware{
-		MinVersion: "1.0.0",
-		MaxVersion: "1.0.0",
+		MinVersion: "0.0.1",
+		MaxVersion: "0.0.1",
 	}
 }
 
