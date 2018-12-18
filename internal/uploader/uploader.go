@@ -27,8 +27,25 @@ const (
 	fileNameSize = 16
 )
 
+type Uploader struct {
+	bucket      string
+	maxFileSize int64
+	filesCount  int
+}
+
+type UploadStatus struct {
+	fname string
+	code  int
+	msg   string
+}
+
 func NewUploader(cfg map[string]string) Uploader {
 	fsize, err := strconv.ParseInt(cfg["GIFKA_UPLOADER_MAX_FILE_SIZE"], 10, 64)
+	if err != nil {
+		panic(err)
+	}
+
+	filesCount, err := strconv.Atoi(cfg["GIFKA_UPLOADER_FILES_COUNT"])
 	if err != nil {
 		panic(err)
 	}
@@ -36,30 +53,21 @@ func NewUploader(cfg map[string]string) Uploader {
 	return Uploader{
 		bucket:      cfg["GIFKA_UPLOADER_GC_BUCKET"],
 		maxFileSize: fsize,
+		filesCount:  filesCount,
 	}
-}
-
-type UploadError struct {
-	code    int
-	message string
-}
-
-type Uploader struct {
-	bucket      string
-	maxFileSize int64
 }
 
 func (u *Uploader) Upload(writer rest.ResponseWriter, req *rest.Request) {
 	// Upload a file to the local disk
 	req.ParseMultipartForm(u.maxFileSize << 20)
-	fname, e := uploadToDisk(req)
-	if e != nil {
-		rest.Error(writer, e.message, e.code)
+	status := uploadToDisk(req)
+	if status.code >= 300 {
+		rest.Error(writer, status.msg, status.code)
 		return
 	}
 
 	// Upload a file to GCS
-	objAttrs, err := uploadToGCS(fname, u.bucket)
+	objAttrs, err := uploadToGCS(status.fname, u.bucket)
 	if err != nil {
 		switch err {
 		case storage.ErrBucketNotExist:
@@ -70,7 +78,7 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, req *rest.Request) {
 	}
 
 	// Remove uploaded a file from the local disk
-	err = os.Remove(tmpPath + fname)
+	err = os.Remove(tmpPath + status.fname)
 	if err != nil {
 		rest.Error(writer, err.Error(), http.StatusInternalServerError)
 	}
@@ -78,10 +86,40 @@ func (u *Uploader) Upload(writer rest.ResponseWriter, req *rest.Request) {
 	writer.WriteJson(map[string]string{"Body": objAttrs.Name})
 }
 
-func uploadToDisk(req *rest.Request) (string, *UploadError) {
+func (u *Uploader) UploadBatch(writer rest.ResponseWriter, _req *rest.Request) {
+	// Upload a file to the local disk
+	// req.ParseMultipartForm((u.maxFileSize * u.filesCount) << 20)
+	// fname, e := uploadToDisk(req)
+	// if e != nil {
+	// 	rest.Error(writer, e.message, e.code)
+	// 	return
+	// }
+
+	// // Upload a file to GCS
+	// objAttrs, err := uploadToGCS(fname, u.bucket)
+	// if err != nil {
+	// 	switch err {
+	// 	case storage.ErrBucketNotExist:
+	// 		rest.Error(writer, "Cannot upload the file to GCS", http.StatusInternalServerError)
+	// 	default:
+	// 		rest.Error(writer, err.Error(), http.StatusInternalServerError)
+	// 	}
+	// }
+
+	// // Remove uploaded a file from the local disk
+	// err = os.Remove(tmpPath + fname)
+	// if err != nil {
+	// 	rest.Error(writer, err.Error(), http.StatusInternalServerError)
+	// }
+
+	writer.WriteJson(map[string]string{"Body": "Not implemented yet"})
+}
+
+
+func uploadToDisk(req *rest.Request) *UploadStatus {
 	srcFile, srcAttrs, err := req.FormFile("file")
 	if err != nil {
-		return srcAttrs.Filename, &UploadError{http.StatusBadRequest, err.Error()}
+		return &UploadStatus{srcAttrs.Filename, http.StatusBadRequest, err.Error()}
 	}
 	defer srcFile.Close()
 
@@ -89,20 +127,20 @@ func uploadToDisk(req *rest.Request) (string, *UploadError) {
 	head := make([]byte, 261)
 	srcFile.Read(head)
 	if !isValid(head) {
-		return srcAttrs.Filename, &UploadError{http.StatusBadRequest, "Supported file types: mp4, gif, webm and avi"}
+		return &UploadStatus{srcAttrs.Filename, http.StatusBadRequest, "Supported file types: mp4, gif, webm and avi"}
 	}
 
 	dstFile, err := os.OpenFile(tmpPath+srcAttrs.Filename, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		return srcAttrs.Filename, &UploadError{http.StatusInternalServerError, err.Error()}
+		return &UploadStatus{srcAttrs.Filename, http.StatusInternalServerError, err.Error()}
 	}
 	defer dstFile.Close()
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return srcAttrs.Filename, &UploadError{http.StatusInternalServerError, err.Error()}
+		return &UploadStatus{srcAttrs.Filename, http.StatusInternalServerError, err.Error()}
 	}
 
-	return srcAttrs.Filename, nil
+	return &UploadStatus{fname: srcAttrs.Filename}
 }
 
 func uploadToGCS(name, bucketName string) (*storage.ObjectAttrs, error) {
