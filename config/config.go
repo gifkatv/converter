@@ -16,7 +16,7 @@ func Load() map[string]string {
 	var environment map[string]string
 	environment, err := godotenv.Read("config/.env." + env)
 
-	if (err != nil) {
+	if err != nil {
 		panic(err)
 	}
 

@@ -23,7 +23,7 @@ var (
 )
 
 const (
-	tmpPath = "/tmp/"
+	tmpPath      = "/tmp/"
 	fileNameSize = 16
 )
 
@@ -34,18 +34,18 @@ func NewUploader(cfg map[string]string) Uploader {
 	}
 
 	return Uploader{
-		bucket: cfg["GIFKA_UPLOADER_GC_BUCKET"],
+		bucket:      cfg["GIFKA_UPLOADER_GC_BUCKET"],
 		maxFileSize: fsize,
 	}
 }
 
 type UploadError struct {
-	code int
+	code    int
 	message string
 }
 
 type Uploader struct {
-	bucket string
+	bucket      string
 	maxFileSize int64
 }
 
@@ -92,7 +92,7 @@ func uploadToDisk(req *rest.Request) (string, *UploadError) {
 		return srcAttrs.Filename, &UploadError{http.StatusBadRequest, "Supported file types: mp4, gif, webm and avi"}
 	}
 
-	dstFile, err := os.OpenFile(tmpPath + srcAttrs.Filename, os.O_WRONLY|os.O_CREATE, 0644)
+	dstFile, err := os.OpenFile(tmpPath+srcAttrs.Filename, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return srcAttrs.Filename, &UploadError{http.StatusInternalServerError, err.Error()}
 	}

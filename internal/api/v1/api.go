@@ -6,21 +6,12 @@ import (
 
 	// Router
 	"github.com/gifkatv/converter/internal/router"
-
-	// Validate input filetype
-	// "github.com/h2non/filetype"
-
-	// "cloud.google.com/go/storage"
-
 	// Background jobs
 	// "github.com/gomodule/redigo/redis"
 	// "github.com/gocraft/work"
 )
 
 // const RedisNamespace = "gifka"
-
-
-
 
 // Make a redis pool
 // var redisPool = &redis.Pool{
