@@ -45,7 +45,8 @@ func initRouter(cfg map[string]string, status *rest.StatusMiddleware) rest.App {
 
 		rest.Post("/v#version/video/batch", svmw.MiddlewareFunc(
 			func(w rest.ResponseWriter, r *rest.Request) {
-				// Process the list of uploaded files in a background
+				u := uploader.NewUploader(cfg)
+				u.UploadBatch(w, r)
 			},
 		)),
 	)
